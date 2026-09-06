@@ -1,1 +1,79 @@
+name: Build and Release GameSpace APK
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout GameSpace Repository
+      uses: actions/checkout@v4
+      with:
+        repository: IRedDragonICY/GameSpace
+        ref: main
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    
+    - name: Build Release APK
+      run: ./gradlew assembleRelease
+    
+    - name: Create TWRP Flashable
+      run: |
+        mkdir -p GameSpace-TWRP/system/priv-app/GameSpace
+        mkdir -p GameSpace-TWRP/META-INF/com/google/android
+        
+        cp app/build/outputs/apk/release/app-release.apk GameSpace-TWRP/system/priv-app/GameSpace/GameSpace.apk
+        
+        cat > GameSpace-TWRP/META-INF/com/google/android/updater-script << 'SCRIPT'
+        ui_print("╔════════════════════════════════════════╗");
+        ui_print("║     Installing GameSpace v0.2          ║");
+        ui_print("║  IRedDragonICY's Advanced Game Space  ║");
+        ui_print("╚════════════════════════════════════════╝");
+        ui_print(" ");
+        ui_print("Installing system app...");
+        package_extract_dir("system", "/system");
+        ui_print(" ");
+        ui_print("Setting permissions...");
+        set_perm_recursive(0, 0, 0755, 0644, "/system/priv-app/GameSpace");
+        set_perm(0, 0, 0644, "/system/priv-app/GameSpace/GameSpace.apk");
+        ui_print(" ");
+        ui_print("Installation complete!");
+        set_progress(1.000000);
+        SCRIPT
+        
+        cat > GameSpace-TWRP/META-INF/com/google/android/update-binary << 'BINARY'
+        #!/sbin/sh
+        OUTFD=$2
+        ZIPFILE=$3
+        ui_print() {
+          echo "ui_print $1" >> /proc/self/fd/$OUTFD
+          echo "ui_print" >> /proc/self/fd/$OUTFD
+        }
+        ui_print "TWRP Flashable Installer"
+        BINARY
+        
+        chmod +x GameSpace-TWRP/META-INF/com/google/android/update-binary
+        cd GameSpace-TWRP
+        zip -r -q "../GameSpace-v0.2-TWRP-Flashable.zip" . -x "*.DS_Store"
+        cd ..
+    
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: gamespace-builds
+        path: |
+          app/build/outputs/apk/release/app-release.apk
+          GameSpace-v0.2-TWRP-Flashable.zip
+        retention-days: 90
